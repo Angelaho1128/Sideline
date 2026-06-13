@@ -18,8 +18,8 @@ _FOCUS_IMP_REF = None  # prevent garbage collection of ctypes callback
 
 
 def _patch_tk_window_focus():
-    """Override canBecomeKeyWindow on Tk's NSWindow subclass so borderless
-    windows can receive keyboard events on macOS."""
+    """Override canBecomeKeyWindow and canBecomeMainWindow on Tk's NSWindow
+    subclass so borderless windows can receive keyboard events on macOS."""
     global _FOCUS_IMP_REF
     if sys.platform != "darwin":
         return
@@ -41,13 +41,14 @@ def _patch_tk_window_focus():
             return True
 
         _FOCUS_IMP_REF = _yes
-        sel = libobjc.sel_registerName(b"canBecomeKeyWindow")
 
         for name in (b"TKWindow", b"NSWindow"):
             cls = libobjc.objc_getClass(name)
             if cls:
-                libobjc.class_replaceMethod(cls, sel, _yes, b"B@:")
-                print(f"[sidelines] Patched {name.decode()}.canBecomeKeyWindow")
+                for sel_name in (b"canBecomeKeyWindow", b"canBecomeMainWindow"):
+                    sel = libobjc.sel_registerName(sel_name)
+                    libobjc.class_replaceMethod(cls, sel, _yes, b"B@:")
+                print(f"[sidelines] Patched {name.decode()}.canBecomeKeyWindow + canBecomeMainWindow")
                 break
     except Exception as exc:
         print(f"[sidelines] canBecomeKeyWindow patch failed: {exc}", file=sys.stderr)
@@ -118,6 +119,11 @@ class SidelinesOverlay:
         _patch_tk_window_focus()  # must run after Tk registers TKWindow
         self._build_window()
 
+        # On macOS, make the window appear on all Spaces immediately.
+        # This must happen early — before the user might switch Spaces.
+        if sys.platform == "darwin":
+            self.root.after(50, self._apply_macos_overlay_behavior)
+
         # Resolve native window ID after the window is mapped
         self.root.after(500, self._resolve_and_register_window)
 
@@ -126,6 +132,9 @@ class SidelinesOverlay:
     # ------------------------------------------------------------------
 
     def _build_window(self):
+        # Same on both platforms: borderless + topmost + translucent.
+        # On macOS, canBecomeKeyWindow/canBecomeMainWindow patches
+        # (applied above) allow keyboard input in borderless windows.
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
@@ -324,31 +333,73 @@ class SidelinesOverlay:
     # macOS overlay configuration
     # ------------------------------------------------------------------
 
-    def _configure_macos_overlay(self):
-        if sys.platform != "darwin":
-            return
+    def _apply_macos_overlay_behavior(self):
+        """Make the overlay appear on all Spaces, including over fullscreen apps.
+
+        On macOS 26+, only NSPanel (not NSWindow) can overlay fullscreen apps.
+        TKWindow inherits from NSWindow and can't do this alone.  We create an
+        invisible NSPanel and attach the TKWindow as its child — the child
+        window inherits the panel's Space behaviour and follows it everywhere.
+        """
         try:
-            from AppKit import NSApp, NSApplication
+            from AppKit import (
+                NSApp, NSApplication, NSPanel, NSWindowAbove,
+                NSWindowStyleMaskBorderless,
+                NSWindowStyleMaskNonactivatingPanel,
+                NSWindowCollectionBehaviorCanJoinAllSpaces,
+                NSWindowCollectionBehaviorFullScreenAuxiliary,
+                NSWindowCollectionBehaviorStationary,
+            )
+            from Foundation import NSMakeRect
             NSApplication.sharedApplication()
 
-            target = None
-            for ns_win in NSApp.windows():
-                if ns_win.windowNumber() == self.native_window_id:
-                    target = ns_win
-                    break
+            self.root.update_idletasks()
 
-            if target is None:
-                ns_windows = NSApp.windows()
-                if not ns_windows:
-                    self.root.after(200, self._configure_macos_overlay)
-                    return
-                target = ns_windows[0]
+            # Find the TKWindow (the real tkinter window)
+            tk_window = None
+            for w in NSApp.windows():
+                try:
+                    if str(w.className()) == "TKWindow" and w.frame().size.width > 10:
+                        tk_window = w
+                        break
+                except Exception:
+                    continue
+            if tk_window is None:
+                self.root.after(100, self._apply_macos_overlay_behavior)
+                return
 
-            target.setLevel_(1000)                 # above fullscreen apps
-            target.setCollectionBehavior_(1 | 16 | 256)  # all spaces + fullscreen
-            target.makeKeyAndOrderFront_(None)
+            # Create a tiny invisible NSPanel — its only job is to carry the
+            # TKWindow onto fullscreen Spaces via the child-window relationship.
+            carrier = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
+                NSMakeRect(0, 0, 1, 1),
+                NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel,
+                2,  # NSBackingStoreBuffered
+                False,
+            )
+            carrier.setLevel_(1000)
+            carrier.setCollectionBehavior_(
+                NSWindowCollectionBehaviorCanJoinAllSpaces
+                | NSWindowCollectionBehaviorFullScreenAuxiliary
+                | NSWindowCollectionBehaviorStationary
+            )
+            carrier.setAlphaValue_(0.0)
+            carrier.orderFront_(None)
+
+            # Attach TKWindow as child — it inherits the panel's Space behaviour
+            carrier.addChildWindow_ordered_(tk_window, NSWindowAbove)
+            tk_window.setLevel_(1000)
+            tk_window.setHasShadow_(True)
+
             NSApp.activateIgnoringOtherApps_(True)
-            print("[sidelines] macOS overlay configured: fullscreen + keyboard focus")
+
+            # Keep a reference so the carrier isn't garbage-collected
+            self._carrier_panel = carrier
+
+            print(f"[sidelines] macOS overlay: fullscreen=yes, "
+                  f"level={tk_window.level()}, visible={tk_window.isVisible()}")
+        except ImportError:
+            print("[sidelines] AppKit unavailable — overlay won't appear over fullscreen apps",
+                  file=sys.stderr)
         except Exception as exc:
             print(f"[sidelines] macOS overlay config warning: {exc}", file=sys.stderr)
 
@@ -364,17 +415,16 @@ class SidelinesOverlay:
 
     def _resolve_macos(self):
         """Find this process's CGWindowID and register it with the frame buffer."""
-        from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+        from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionAll, kCGNullWindowID
 
         pid = os.getpid()
-        windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
+        windows = CGWindowListCopyWindowInfo(kCGWindowListOptionAll, kCGNullWindowID)
         if windows:
             for w in windows:
                 if w.get("kCGWindowOwnerPID") == pid and w.get("kCGWindowNumber", 0) > 0:
                     self.native_window_id = w["kCGWindowNumber"]
                     self.frame_buffer.set_exclude_window(self.native_window_id)
                     print(f"[sidelines] Overlay CGWindowID: {self.native_window_id}")
-                    self._configure_macos_overlay()
                     return
         self.root.after(200, self._resolve_macos)
 

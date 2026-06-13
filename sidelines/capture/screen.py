@@ -19,6 +19,8 @@ if sys.platform == "darwin":
         CGImageGetBytesPerRow,
         CGImageGetDataProvider,
         CGDataProviderCopyData,
+        CGPreflightScreenCaptureAccess,
+        CGRequestScreenCaptureAccess,
     )
     _MACOS = True
 else:
@@ -66,6 +68,15 @@ class FrameBuffer:
                 self._exclude_id,
                 kCGWindowImageDefault,
             )
+            # Fallback: capture everything (overlay may appear in frame).
+            # Don't clear _exclude_id — the failure is often transient.
+            if cg_image is None:
+                cg_image = CGWindowListCreateImage(
+                    CGRectNull,
+                    kCGWindowListOptionOnScreenOnly,
+                    kCGNullWindowID,
+                    kCGWindowImageDefault,
+                )
         else:
             cg_image = CGWindowListCreateImage(
                 CGRectNull,
@@ -75,9 +86,15 @@ class FrameBuffer:
             )
 
         if cg_image is None:
+            if not CGPreflightScreenCaptureAccess():
+                CGRequestScreenCaptureAccess()
+                raise RuntimeError(
+                    "Screen Recording permission not granted. A system prompt "
+                    "should appear — grant access, then restart the app."
+                )
             raise RuntimeError(
-                "Screen capture failed. Check Screen Recording permission in "
-                "System Settings > Privacy & Security."
+                "Screen capture returned None despite having permission. "
+                "Try restarting the app."
             )
 
         w = CGImageGetWidth(cg_image)

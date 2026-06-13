@@ -26,7 +26,7 @@ class FrameAnalyzer:
             "ocr_text": self.last_ocr_text,
         }
 
-        if self.prev_gray is not None:
+        if self.prev_gray is not None and self.prev_gray.shape == gray.shape:
             # 1. Frame differencing for motion score
             diff = cv2.absdiff(self.prev_gray, gray)
             self.last_diff = diff.copy()
