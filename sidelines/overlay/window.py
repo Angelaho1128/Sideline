@@ -6,6 +6,9 @@ import tempfile
 import threading
 import tkinter as tk
 
+from PIL import ImageTk
+
+from overlay import icons
 from intelligence.gemini import GeminiClient
 from intelligence.key_frames import KeyFrameSelector
 from intelligence.tts import TTSClient
@@ -97,13 +100,27 @@ class SidelinesOverlay:
         self.gemini = GeminiClient()
         self.tts = TTSClient()
 
-        # Theme colors
-        self.bg = "#1e1e1e"
-        self.input_bg = "#2d2d2d"
-        self.text_color = "#e0e0e0"
-        self.muted = "#9e9e9e"
-        self.accent = "#8ab4f8"
-        self.border = "#3c3c3c"
+        # Theme colors — glassmorphism (Tailwind zinc palette)
+        self.bg = "#18181b"          # zinc-900 panel (~88% opacity via -alpha)
+        self.input_bg = "#0a0a0b"    # zinc-950 nested input surface
+        self.tab_bg = "#18181b"      # zinc-900 left collapse tab
+        self.text_color = "#FFFFFF"  # primary text / icons
+        self.response_color = "#FFFFFF"  # assistant message text
+        self.muted = "#a1a1aa"       # zinc-400 placeholder
+        self.border = "#3a3a3f"      # ~10% white hairline on dark
+        self.divider = "#2e2e32"     # subtle section separators
+
+        self._imgs = {}              # keep PhotoImage refs alive
+        self._collapsed = False
+
+        # Helvetica Neue Thin (style 35). On macOS tkinter resolves
+        # "Helvetica Neue Thin" / "HelveticaNeue-Thin" to the correct face.
+        if sys.platform == "darwin":
+            self.ui_font = "Helvetica Neue Thin"
+        elif sys.platform == "win32":
+            self.ui_font = "Segoe UI Light"
+        else:
+            self.ui_font = "Helvetica"
 
         # Tell Windows we handle DPI ourselves — must happen before Tk init
         if sys.platform == "win32":
@@ -131,95 +148,184 @@ class SidelinesOverlay:
     # UI construction
     # ------------------------------------------------------------------
 
+    # window/content geometry constants
+    WIDTH = 360       # mockup: w-[360px]
+    HEIGHT = 480      # mockup: aspect-[3/4] -> 360 * 4/3
+    PAD = 20          # outer gutter (p-5) between content and window edge
+    STRIP = 24        # width of the collapsed strip (just the tab)
+
     def _build_window(self):
         # Same on both platforms: borderless + topmost + translucent.
         # On macOS, canBecomeKeyWindow/canBecomeMainWindow patches
         # (applied above) allow keyboard input in borderless windows.
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.92)
+        self.root.attributes("-alpha", 0.88)
         self.root.configure(bg=self.bg)
 
-        width, height = 380, 560
+        width, height = self.WIDTH, self.HEIGHT
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         x = screen_w - width - 20
         y = (screen_h - height) // 2
+        self._expanded_geometry = (width, height, x, y)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-        # --- Title bar (top) ---
-        header = tk.Frame(self.root, bg=self.bg, height=36)
-        header.pack(side=tk.TOP, fill=tk.X)
-        header.pack_propagate(False)
+        # --- Icon images (kept on self._imgs so they aren't GC'd) ---
+        white = (255, 255, 255, 255)
+        self._imgs["logo"] = ImageTk.PhotoImage(icons.brand_logo(22, color=white))
+        self._imgs["mic"] = ImageTk.PhotoImage(icons.mic(20, color=white))
+        self._imgs["send"] = ImageTk.PhotoImage(icons.send(20, color=white))
+        self._imgs["chev_left"] = ImageTk.PhotoImage(
+            icons.chevron(16, "left", color=white))
+        self._imgs["chev_right"] = ImageTk.PhotoImage(
+            icons.chevron(16, "right", color=white))
 
-        tk.Label(
-            header, text="Sidelines", font=("Helvetica", 13, "bold"),
-            bg=self.bg, fg=self.text_color,
-        ).pack(side=tk.LEFT, padx=12)
+        # --- Content holder (everything but the left tab) ---
+        self.content = tk.Frame(self.root, bg=self.bg)
+        self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        inner_w = width - 2 * self.PAD
+
+        # --- Header: brand logo (left) + close (right) ---
+        header = tk.Frame(self.content, bg=self.bg)
+        header.pack(side=tk.TOP, fill=tk.X, padx=self.PAD, pady=(self.PAD, 4))
+
+        logo_lbl = tk.Label(header, image=self._imgs["logo"], bg=self.bg)
+        logo_lbl.pack(side=tk.LEFT)
 
         close_btn = tk.Label(
-            header, text="\u2715", font=("Helvetica", 13),
-            bg=self.bg, fg=self.muted, cursor="hand2",
+            header, text="\u2715", font=(self.ui_font, 15),
+            bg=self.bg, fg=self.text_color, cursor="hand2",
         )
-        close_btn.pack(side=tk.RIGHT, padx=10)
+        close_btn.pack(side=tk.RIGHT)
         close_btn.bind("<Button-1>", lambda e: self._quit())
 
-        header.bind("<ButtonPress-1>", self._start_drag)
-        header.bind("<B1-Motion>", self._on_drag)
+        for w in (header, logo_lbl):
+            w.bind("<ButtonPress-1>", self._start_drag)
+            w.bind("<B1-Motion>", self._on_drag)
 
         # --- Input bar (bottom) — packed BEFORE response so it's never clipped ---
-        input_container = tk.Frame(self.root, bg=self.input_bg, padx=12, pady=10)
-        input_container.pack(side=tk.BOTTOM, fill=tk.X, padx=16, pady=(0, 12))
+        self._build_input(self.content, inner_w)
 
-        # --- Separator (above input) ---
-        tk.Frame(self.root, bg=self.border, height=1).pack(side=tk.BOTTOM, fill=tk.X, padx=16)
+        # --- Message area: solid white rule + response text (no sparkle) ---
+        # `message_frame` reserves the middle space (pushes the input to the
+        # bottom); `msg_row` hugs the top so the accent bar matches text height
+        # like the mockup's `items-start`.
+        message_frame = tk.Frame(self.content, bg=self.bg)
+        message_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True,
+                           padx=self.PAD, pady=(self.PAD, self.PAD))
 
-        # --- Response area (fills remaining space) ---
-        response_frame = tk.Frame(self.root, bg=self.bg)
-        response_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=16, pady=(4, 8))
+        msg_row = tk.Frame(message_frame, bg=self.bg)
+        msg_row.pack(side=tk.TOP, fill=tk.X, anchor=tk.N)
+
+        # A fixed-width Frame stretches vertically (fill=Y) to the text height,
+        # giving the mockup's `w-[2px] self-stretch` white indicator bar.
+        accent_line = tk.Frame(msg_row, width=2, bg=self.text_color)
+        accent_line.pack(side=tk.LEFT, fill=tk.Y, padx=(2, 12))
+        accent_line.pack_propagate(False)
 
         self.response_text = tk.Text(
-            response_frame, wrap=tk.WORD, font=("Helvetica", 13),
-            bg=self.bg, fg=self.text_color, relief=tk.FLAT,
+            msg_row, wrap=tk.WORD, font=(self.ui_font, 15),
+            bg=self.bg, fg=self.response_color, relief=tk.FLAT,
             insertbackground=self.text_color,
-            borderwidth=0, highlightthickness=0,
-            padx=0, pady=4,
+            borderwidth=0, highlightthickness=0, height=2,
+            padx=0, pady=0, spacing1=2, spacing2=5, spacing3=2,
         )
-        self.response_text.pack(fill=tk.BOTH, expand=True)
-        self.response_text.insert("1.0", "Ask me anything about the game.")
+        self.response_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._resp_w = 0
+        # Refit height whenever the wrap width actually changes (not on every
+        # configure, which would loop as the height re-adjusts).
+        self.response_text.bind(
+            "<Configure>",
+            lambda e: (e.width != self._resp_w) and (
+                setattr(self, "_resp_w", e.width) or self._fit_response_height()),
+        )
+        self.response_text.insert(
+            "1.0", "Hello! I'll guide you through any sport, just ask me anything!")
         self.response_text.config(state=tk.DISABLED)
+        # Size the text box to its content once the window has a real width.
+        self.root.after(80, self._fit_response_height)
+
+        # --- Left collapse tab (overlays the left edge, vertically centered) ---
+        # Mockup: h-10 w-6 rounded-l-md arrow tab on the panel's left edge.
+        tab_w = self.STRIP - 6
+        self.tab = tk.Canvas(
+            self.root, width=tab_w, height=40,
+            bg=self.bg, highlightthickness=0, cursor="hand2",
+        )
+        self._round_rect(self.tab, 1, 1, tab_w - 1, 39, 6,
+                         fill=self.tab_bg, outline=self.border, width=1)
+        self._tab_chev = self.tab.create_image(
+            tab_w / 2, 20, image=self._imgs["chev_left"])
+        self.tab.place(x=2, rely=0.5, anchor=tk.W)
+        self.tab.bind("<Button-1>", self._toggle_tab)
+
+    def _build_input(self, parent, inner_w):
+        """Rounded input box: text field on top, mic + send controls below.
+
+        Mirrors the mockup's `rounded-xl bg-zinc-950/40 p-3 flex-col gap-3`.
+        """
+        h = 86             # p-3 (12) + field (~26) + gap-3 (12) + icons (~24) + p-3 (12)
+        pad = 12           # p-3
+        field_y = 28       # baseline of the text field row
+        icon_row_y = h - 24  # baseline of the mic/send controls row
+        c = tk.Canvas(parent, width=inner_w, height=h, bg=self.bg,
+                      highlightthickness=0)
+        c.pack(side=tk.BOTTOM, padx=self.PAD, pady=(0, self.PAD))
+        self._round_rect(c, 1, 1, inner_w - 1, h - 1, 12,
+                         fill=self.input_bg, outline=self.border, width=1)
 
         self.input_field = tk.Entry(
-            input_container, font=("Helvetica", 13),
-            bg=self.input_bg, fg=self.text_color,
+            c, font=(self.ui_font, 14),
+            bg=self.input_bg, fg=self.muted,
             insertbackground=self.text_color,
-            relief=tk.FLAT, borderwidth=0,
+            relief=tk.FLAT, borderwidth=0, highlightthickness=0,
         )
-        self.input_field.pack(fill=tk.X, ipady=4)
-        self.input_field.insert(0, "Ask anything")
+        c.create_window(pad + 4, field_y, anchor=tk.W, window=self.input_field,
+                        width=inner_w - 2 * pad - 8)
+        self.input_field.insert(0, "Ask Anything")
         self.input_field.bind("<FocusIn>", self._clear_placeholder)
         self.input_field.bind("<FocusOut>", self._restore_placeholder)
         self.input_field.bind("<Return>", self._on_submit)
         self.input_field.bind("<Button-1>", self._focus_input)
-        self.input_field.config(fg=self.muted)
 
-        icons_row = tk.Frame(input_container, bg=self.input_bg)
-        icons_row.pack(fill=tk.X, pady=(6, 0))
+        # Controls row: mic (left) doubles as the speak/TTS affordance.
+        self.speaker_btn = c.create_image(pad + 10, icon_row_y, image=self._imgs["mic"])
+        c.tag_bind(self.speaker_btn, "<Button-1>", self._on_speak)
 
-        self.speaker_btn = tk.Label(
-            icons_row, text="\U0001F50A", font=("Helvetica", 14),
-            bg=self.input_bg, fg=self.muted, cursor="hand2",
-        )
-        self.speaker_btn.pack(side=tk.LEFT)
-        self.speaker_btn.bind("<Button-1>", self._on_speak)
+        send_item = c.create_image(inner_w - pad - 10, icon_row_y, image=self._imgs["send"])
+        c.tag_bind(send_item, "<Button-1>", self._on_submit)
 
-        send_btn = tk.Label(
-            icons_row, text="\u2191", font=("Helvetica", 16, "bold"),
-            bg=self.accent, fg="#1e1e1e", cursor="hand2",
-            padx=6, pady=1,
-        )
-        send_btn.pack(side=tk.RIGHT)
-        send_btn.bind("<Button-1>", self._on_submit)
+    @staticmethod
+    def _round_rect(canvas, x1, y1, x2, y2, r, **kwargs):
+        """Draw a rounded rectangle on a canvas via a smoothed polygon."""
+        pts = [
+            x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
+            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+            x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
+        ]
+        return canvas.create_polygon(pts, smooth=True, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Collapse tab
+    # ------------------------------------------------------------------
+
+    def _toggle_tab(self, event=None):
+        w, h, _, _ = self._expanded_geometry
+        cur_x, cur_y = self.root.winfo_x(), self.root.winfo_y()
+        if self._collapsed:
+            new_x = cur_x - (w - self.STRIP)  # re-grow leftward; right edge fixed
+            self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+            self.root.geometry(f"{w}x{h}+{new_x}+{cur_y}")
+            self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_left"])
+            self._collapsed = False
+        else:
+            self.content.pack_forget()
+            new_x = cur_x + (w - self.STRIP)  # shrink to the right edge
+            self.root.geometry(f"{self.STRIP}x{h}+{new_x}+{cur_y}")
+            self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_right"])
+            self._collapsed = True
 
     # ------------------------------------------------------------------
     # Drag
@@ -239,13 +345,13 @@ class SidelinesOverlay:
     # ------------------------------------------------------------------
 
     def _clear_placeholder(self, event):
-        if self.input_field.get() == "Ask anything":
+        if self.input_field.get() == "Ask Anything":
             self.input_field.delete(0, tk.END)
             self.input_field.config(fg=self.text_color)
 
     def _restore_placeholder(self, event):
         if not self.input_field.get().strip():
-            self.input_field.insert(0, "Ask anything")
+            self.input_field.insert(0, "Ask Anything")
             self.input_field.config(fg=self.muted)
 
     def _set_response(self, text):
@@ -253,6 +359,17 @@ class SidelinesOverlay:
         self.response_text.delete("1.0", tk.END)
         self.response_text.insert("1.0", text)
         self.response_text.config(state=tk.DISABLED)
+        self._fit_response_height()
+
+    def _fit_response_height(self):
+        """Shrink/grow the response box to fit its wrapped content so the
+        accent bar matches the text height (mockup's `items-start`)."""
+        try:
+            self.response_text.update_idletasks()
+            lines = self.response_text.count("1.0", "end", "displaylines")[0]
+            self.response_text.config(height=max(2, int(lines)))
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Submit / AI pipeline
@@ -260,7 +377,7 @@ class SidelinesOverlay:
 
     def _on_submit(self, event):
         question = self.input_field.get().strip()
-        if not question or question == "Ask anything":
+        if not question or question == "Ask Anything":
             return
         self.input_field.delete(0, tk.END)
         self._set_response("Thinking...")
@@ -390,6 +507,9 @@ class SidelinesOverlay:
             tk_window.setLevel_(1000)
             tk_window.setHasShadow_(True)
 
+            # Rounded corners + subtle 15%-white border — pure presentation.
+            self._round_macos_window(tk_window)
+
             NSApp.activateIgnoringOtherApps_(True)
 
             # Keep a reference so the carrier isn't garbage-collected
@@ -402,6 +522,46 @@ class SidelinesOverlay:
                   file=sys.stderr)
         except Exception as exc:
             print(f"[sidelines] macOS overlay config warning: {exc}", file=sys.stderr)
+
+    def _round_macos_window(self, tk_window):
+        """Clip the window to rounded corners and draw a hairline white border.
+
+        Makes the overlay read as a floating glass pill. Best-effort: any
+        failure leaves the square window intact without affecting behaviour.
+        """
+        try:
+            from AppKit import NSColor
+            from Quartz import CGColorCreateGenericRGB
+
+            # The window itself defaults to an opaque square background that
+            # fills the full frame — its square corners show through behind the
+            # rounded content layer. Make it non-opaque with a clear background
+            # so the rounded content view is the only visible surface.
+            tk_window.setOpaque_(False)
+            tk_window.setBackgroundColor_(NSColor.clearColor())
+
+            content = tk_window.contentView()
+            content.setWantsLayer_(True)
+            layer = content.layer()
+            if layer is None:
+                return
+            layer.setCornerRadius_(16.0)
+            layer.setMasksToBounds_(True)
+            # 1px border at ~15% white opacity
+            layer.setBorderWidth_(1.0)
+            layer.setBorderColor_(CGColorCreateGenericRGB(1.0, 1.0, 1.0, 0.15))
+
+            for sub in content.subviews():
+                try:
+                    sub.setWantsLayer_(True)
+                    sub_layer = sub.layer()
+                    if sub_layer is not None:
+                        sub_layer.setCornerRadius_(16.0)
+                        sub_layer.setMasksToBounds_(True)
+                except Exception:
+                    continue
+        except Exception as exc:
+            print(f"[sidelines] corner rounding skipped: {exc}", file=sys.stderr)
 
     # ------------------------------------------------------------------
     # Window ID resolution — platform-specific
