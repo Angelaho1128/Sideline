@@ -4,10 +4,9 @@ import numpy as np
 
 from Quartz import (
     CGWindowListCreateImage,
-    CGWindowListCopyWindowInfo,
     CGRectNull,
-    kCGWindowListOptionOnScreenBelowWindow,
     kCGWindowListOptionOnScreenOnly,
+    kCGWindowListOptionOnScreenBelowWindow,
     kCGWindowImageDefault,
     kCGNullWindowID,
     CGImageGetWidth,
@@ -23,24 +22,24 @@ class FrameBuffer:
         self.fps = fps
         self.buffer_seconds = buffer_seconds
         self.buffer = collections.deque(maxlen=fps * buffer_seconds)
-        self.exclude_window_id = kCGNullWindowID
+        self._exclude_window_id = kCGNullWindowID
 
     def set_exclude_window(self, cg_window_id):
-        """Set the CGWindowID to exclude from captures (the overlay window)."""
-        self.exclude_window_id = cg_window_id
+        """Set the overlay window ID so capture grabs everything below it."""
+        self._exclude_window_id = cg_window_id
 
     def capture_frame(self, bounding_box=None):
-        """Capture a frame from the screen, excluding the overlay window. Returns BGR numpy array."""
-        if self.exclude_window_id != kCGNullWindowID:
-            # Capture everything on screen below our overlay window (excludes it)
+        """Capture the visible screen, excluding the overlay window. Returns BGR numpy array."""
+        if self._exclude_window_id != kCGNullWindowID:
+            # Capture the composited screen below our overlay — exactly what's visible
             cg_image = CGWindowListCreateImage(
                 CGRectNull,
                 kCGWindowListOptionOnScreenBelowWindow,
-                self.exclude_window_id,
+                self._exclude_window_id,
                 kCGWindowImageDefault,
             )
         else:
-            # No exclusion — capture full screen
+            # Overlay not registered yet — capture everything
             cg_image = CGWindowListCreateImage(
                 CGRectNull,
                 kCGWindowListOptionOnScreenOnly,

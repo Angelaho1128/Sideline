@@ -1,4 +1,7 @@
+import ctypes
+import ctypes.util
 import os
+import sys
 import tempfile
 import threading
 import tkinter as tk
@@ -13,6 +16,45 @@ from intelligence.gemini import GeminiClient
 from intelligence.key_frames import KeyFrameSelector
 from intelligence.tts import TTSClient
 from intelligence.video_compiler import compile_to_video
+
+# --- macOS: make borderless windows accept keyboard input ---
+_FOCUS_IMP_REF = None  # prevent garbage collection of ctypes callback
+
+
+def _patch_tk_window_focus():
+    """Override canBecomeKeyWindow on Tk's NSWindow subclass so borderless
+    windows can receive keyboard events on macOS."""
+    global _FOCUS_IMP_REF
+    if sys.platform != "darwin":
+        return
+    try:
+        libobjc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+        libobjc.objc_getClass.argtypes = [ctypes.c_char_p]
+        libobjc.objc_getClass.restype = ctypes.c_void_p
+        libobjc.sel_registerName.argtypes = [ctypes.c_char_p]
+        libobjc.sel_registerName.restype = ctypes.c_void_p
+        libobjc.class_replaceMethod.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char_p,
+        ]
+        libobjc.class_replaceMethod.restype = ctypes.c_void_p
+
+        BOOL_IMP = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        @BOOL_IMP
+        def _yes(self, _cmd):
+            return True
+
+        _FOCUS_IMP_REF = _yes  # prevent GC
+        sel = libobjc.sel_registerName(b"canBecomeKeyWindow")
+
+        for name in (b"TKWindow", b"NSWindow"):
+            cls = libobjc.objc_getClass(name)
+            if cls:
+                libobjc.class_replaceMethod(cls, sel, _yes, b"B@:")
+                print(f"[sidelines] Patched {name.decode()}.canBecomeKeyWindow")
+                break
+    except Exception as exc:
+        print(f"[sidelines] canBecomeKeyWindow patch failed: {exc}", file=sys.stderr)
 
 
 class SidelinesOverlay:
@@ -35,9 +77,10 @@ class SidelinesOverlay:
         self.border = "#3c3c3c"
 
         self.root = tk.Tk()
+        _patch_tk_window_focus()  # must run after Tk registers TKWindow
         self._build_window()
 
-        # Resolve CGWindowID after window is mapped, then register with frame buffer
+        # Resolve CGWindowID after window is mapped, then configure for fullscreen
         self.root.after(500, self._resolve_and_register_window)
 
     def _build_window(self):
@@ -109,6 +152,8 @@ class SidelinesOverlay:
         self.input_field.bind("<FocusIn>", self._clear_placeholder)
         self.input_field.bind("<FocusOut>", self._restore_placeholder)
         self.input_field.bind("<Return>", self._on_submit)
+        self.input_field.bind("<Button-1>", self._focus_input)
+        self.input_field.config(fg=self.muted)  # placeholder starts muted
 
         # Bottom icons row
         icons_row = tk.Frame(input_container, bg=self.input_bg)
@@ -213,6 +258,55 @@ class SidelinesOverlay:
                 target=self.tts.speak, args=(self.last_response,), daemon=True
             ).start()
 
+    def _focus_input(self, event):
+        """Ensure the app is active and the input field has keyboard focus."""
+        self.root.focus_force()
+        self.input_field.focus_set()
+        try:
+            from AppKit import NSApp
+            NSApp.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass
+
+    def _configure_macos_overlay(self):
+        """Set NSWindow level + collection behavior for fullscreen overlay."""
+        if sys.platform != "darwin":
+            return
+        try:
+            from AppKit import NSApp, NSApplication
+            NSApplication.sharedApplication()
+
+            # Find the NSWindow matching our resolved CGWindowID
+            target = None
+            for ns_win in NSApp.windows():
+                if ns_win.windowNumber() == self.cg_window_id:
+                    target = ns_win
+                    break
+
+            if target is None:
+                # Fallback: use first window
+                ns_windows = NSApp.windows()
+                if not ns_windows:
+                    self.root.after(200, self._configure_macos_overlay)
+                    return
+                target = ns_windows[0]
+
+            # Window level above fullscreen apps (kCGScreenSaverWindowLevel = 1000)
+            target.setLevel_(1000)
+
+            # CanJoinAllSpaces (1) — present in every Space including fullscreen
+            # Stationary (16) — don't slide during Space transitions
+            # FullScreenAuxiliary (256) — allowed alongside fullscreen windows
+            target.setCollectionBehavior_(1 | 16 | 256)
+
+            # Activate keyboard focus
+            target.makeKeyAndOrderFront_(None)
+            NSApp.activateIgnoringOtherApps_(True)
+
+            print("[sidelines] macOS overlay configured: fullscreen + keyboard focus")
+        except Exception as exc:
+            print(f"[sidelines] macOS overlay config warning: {exc}", file=sys.stderr)
+
     def _resolve_and_register_window(self):
         """Find our overlay's CGWindowID and register it with the frame buffer."""
         pid = os.getpid()
@@ -223,6 +317,7 @@ class SidelinesOverlay:
                     self.cg_window_id = w["kCGWindowNumber"]
                     self.frame_buffer.set_exclude_window(self.cg_window_id)
                     print(f"Overlay CGWindowID: {self.cg_window_id}")
+                    self._configure_macos_overlay()
                     return
         # Retry if not found yet
         self.root.after(200, self._resolve_and_register_window)

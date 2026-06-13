@@ -17,11 +17,18 @@ from overlay.window import SidelinesOverlay
 
 def capture_loop(frame_buffer, analyzer, fps):
     """Background capture loop — runs forever, silently."""
+    count = 0
     while True:
         try:
             frame = frame_buffer.capture_frame()
             metadata = analyzer.analyze(frame)
             frame_buffer.add_frame(frame, metadata)
+            count += 1
+            if count == 1:
+                h, w = frame.shape[:2]
+                print(f"[capture] First frame captured: {w}x{h}")
+            elif count % (fps * 10) == 0:
+                print(f"[capture] {count} frames, buffer: {len(frame_buffer.buffer)}")
         except Exception as e:
             print(f"Capture error: {e}", file=sys.stderr)
         time.sleep(1.0 / fps)

@@ -1,4 +1,5 @@
 pyobjc-framework-Quartz
+pyobjc-framework-Cocoa
 opencv-python
 pytesseract
 numpy
