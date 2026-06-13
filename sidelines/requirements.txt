@@ -1,5 +1,4 @@
-pyobjc-framework-Quartz
-pyobjc-framework-Cocoa
+# Core
 opencv-python
 pytesseract
 numpy
@@ -7,3 +6,10 @@ pillow
 google-genai
 requests
 python-dotenv
+
+# Screen capture
+# Windows / Linux — fast cross-platform capture
+mss
+
+# macOS only — install manually if on macOS:
+# pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa
