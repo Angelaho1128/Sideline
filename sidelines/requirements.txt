@@ -1,0 +1,8 @@
+pyobjc-framework-Quartz
+opencv-python
+pytesseract
+numpy
+pillow
+google-genai
+requests
+python-dotenv
