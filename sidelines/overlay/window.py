@@ -325,7 +325,6 @@ class SidelinesOverlay:
         """Animate width with the right edge pinned — panel slides in/out."""
         self._animating = True
         elapsed = 0
-        collapsing = end_w < start_w
 
         def tick():
             nonlocal elapsed
@@ -335,9 +334,6 @@ class SidelinesOverlay:
             w = max(self.STRIP, int(start_w + (end_w - start_w) * eased))
             x = int(right_edge - w)
             self.root.geometry(f"{w}x{h}+{x}+{y}")
-
-            if collapsing and w < 80 and self.content.winfo_ismapped():
-                self.content.pack_forget()
 
             if t < 1.0:
                 self.root.after(self.SLIDE_STEP, tick)
@@ -360,22 +356,27 @@ class SidelinesOverlay:
 
         if self._collapsed:
             self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_left"])
-            self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-            self._collapsed = False
             self._slide_window(
-                self.STRIP, w, right_edge, cur_y, h,
-                on_complete=lambda: None,
+                cur_w, w, right_edge, cur_y, h,
+                on_complete=self._finish_expand,
             )
         else:
             self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_right"])
+            # Hide content before shrinking so layout doesn't fight the slide.
+            if self.content.winfo_ismapped():
+                self.content.pack_forget()
+            self.root.update_idletasks()
+            self.root.geometry(f"{cur_w}x{h}+{int(right_edge - cur_w)}+{cur_y}")
             self._slide_window(
                 cur_w, self.STRIP, right_edge, cur_y, h,
                 on_complete=self._finish_collapse,
             )
 
+    def _finish_expand(self):
+        self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self._collapsed = False
+
     def _finish_collapse(self):
-        if self.content.winfo_ismapped():
-            self.content.pack_forget()
         self._collapsed = True
 
     # ------------------------------------------------------------------
