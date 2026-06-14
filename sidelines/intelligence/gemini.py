@@ -40,7 +40,7 @@ class GeminiClient:
             contents=[video_part, question],
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                max_output_tokens=500,
+                max_output_tokens=1000,
                 media_resolution=types.MediaResolution.MEDIA_RESOLUTION_LOW,
             ),
         )

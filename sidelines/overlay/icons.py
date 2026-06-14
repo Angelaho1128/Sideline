@@ -143,6 +143,23 @@ def mic(size, color=(255, 255, 255, 255), width=0.07):
     return _finish(img, size)
 
 
+def speaker(size, color=(255, 255, 255, 255), width=0.07):
+    """A speaker/volume icon for TTS playback."""
+    img = _canvas(size)
+    d = ImageDraw.Draw(img)
+    s = size * SS
+    lw = max(SS, int(width * s))
+    # Speaker body (rectangle)
+    d.rectangle([s * 0.18, s * 0.35, s * 0.35, s * 0.65], fill=color)
+    # Speaker cone (triangle)
+    d.polygon([(s * 0.35, s * 0.35), (s * 0.55, s * 0.18),
+               (s * 0.55, s * 0.82), (s * 0.35, s * 0.65)], fill=color)
+    # Sound waves (arcs)
+    d.arc([s * 0.58, s * 0.30, s * 0.75, s * 0.70], -45, 45, fill=color, width=lw)
+    d.arc([s * 0.65, s * 0.18, s * 0.88, s * 0.82], -45, 45, fill=color, width=lw)
+    return _finish(img, size)
+
+
 def chevron(size, direction="left", color=(255, 255, 255, 255), width=0.12):
     """A single chevron ‹ or ›."""
     img = _canvas(size)

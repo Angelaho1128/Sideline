@@ -8,7 +8,7 @@ from utils.audio import play_audio
 
 class TTSClient:
     def __init__(self):
-        self.api_key = os.getenv("ELEVEN_API_KEY")
+        self.api_key = os.getenv("ELEVEN_TTS_API_KEY")
         self.voice_id = os.getenv("ELEVEN_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
         self.base_url = "https://api.elevenlabs.io/v1/text-to-speech"
 
