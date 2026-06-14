@@ -5,7 +5,11 @@ crisp on Retina displays. All icons are white-on-transparent unless a color
 is supplied, matching the dark-glass overlay aesthetic.
 """
 
+import io
+import math
 import os
+import struct
+import wave
 
 from PIL import Image, ImageDraw
 
@@ -197,3 +201,29 @@ def send(size, color=(255, 255, 255, 255), pad=0.10):
     pts = [(pad * s + x * span * s, pad * s + y * span * s) for x, y in _SEND]
     d.polygon(pts, fill=color)
     return _finish(img, size)
+
+
+# ---------------------------------------------------------------------------
+# Audio tones — tiny WAV buffers for mic press/release cues
+# ---------------------------------------------------------------------------
+
+def generate_tone(freq=880, duration_ms=80, volume=0.3, sample_rate=44100):
+    """Return WAV bytes for a short sine-wave beep."""
+    n_samples = int(sample_rate * duration_ms / 1000)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        for i in range(n_samples):
+            t = i / sample_rate
+            # Fade in/out over 10% of duration to avoid clicks
+            env = 1.0
+            fade = int(n_samples * 0.1)
+            if i < fade:
+                env = i / fade
+            elif i > n_samples - fade:
+                env = (n_samples - i) / fade
+            val = int(32767 * volume * env * math.sin(2 * math.pi * freq * t))
+            wf.writeframes(struct.pack("<h", val))
+    return buf.getvalue()

@@ -110,6 +110,12 @@ class SidelinesOverlay:
         self._audio_chunks = []
         self._audio_stream = None
         self._pyaudio_instance = None
+        self._listening_anim_id = None
+        self._mic_pulse_id = None
+
+        # Pre-generate audio cue WAVs
+        self._tone_start = icons.generate_tone(freq=880, duration_ms=80, volume=0.25)
+        self._tone_stop = icons.generate_tone(freq=660, duration_ms=80, volume=0.25)
 
         # Theme colors — glassmorphism (Tailwind zinc palette)
         self.bg = "#18181b"          # zinc-900 panel (~88% opacity via -alpha)
@@ -189,7 +195,9 @@ class SidelinesOverlay:
         white = (255, 255, 255, 255)
         self._imgs["logo"] = ImageTk.PhotoImage(icons.brand_logo(22, color=white))
         self._imgs["mic"] = ImageTk.PhotoImage(icons.mic(20, color=white))
+        self._imgs["mic_dim"] = ImageTk.PhotoImage(icons.mic(20, color=(161, 161, 170, 255)))  # zinc-400 pressed
         self._imgs["mic_red"] = ImageTk.PhotoImage(icons.mic(20, color=(255, 80, 80, 255)))
+        self._imgs["mic_red_dim"] = ImageTk.PhotoImage(icons.mic(20, color=(180, 50, 50, 255)))  # pulse dim
         self._imgs["send"] = ImageTk.PhotoImage(icons.send(20, color=white))
         self._imgs["chev_left"] = ImageTk.PhotoImage(
             icons.chevron(16, "left", color=white))
@@ -305,11 +313,18 @@ class SidelinesOverlay:
         self.input_field.bind("<Return>", self._on_submit)
         self.input_field.bind("<Button-1>", self._focus_input)
 
-        # Controls row: mic (left) — hold to record voice, tap for TTS.
+        # Controls row: mic (left) — hold to record voice.
         self._input_canvas = c
         self.speaker_btn = c.create_image(pad + 10, icon_row_y, image=self._imgs["mic"])
         c.tag_bind(self.speaker_btn, "<ButtonPress-1>", self._on_mic_press)
         c.tag_bind(self.speaker_btn, "<ButtonRelease-1>", self._on_mic_release)
+
+        # "Hold to talk" hint
+        self._mic_hint = c.create_text(
+            pad + 28, icon_row_y, anchor=tk.W,
+            text="Hold to talk", font=(self.ui_font, 10),
+            fill="#71717a",  # zinc-500
+        )
 
         send_item = c.create_image(inner_w - pad - 10, icon_row_y, image=self._imgs["send"])
         c.tag_bind(send_item, "<Button-1>", self._on_submit)
@@ -447,6 +462,13 @@ class SidelinesOverlay:
         question = self.input_field.get().strip()
         if not question or question == "Ask Anything":
             return
+        # Brief send-icon flash: dim → restore after 150ms
+        self._imgs["send_dim"] = self._imgs.get("send_dim") or ImageTk.PhotoImage(
+            icons.send(20, color=(161, 161, 170, 255)))  # zinc-400
+        send_item = self._input_canvas.find_all()[-1]  # send is the last canvas item
+        self._input_canvas.itemconfigure(send_item, image=self._imgs["send_dim"])
+        self.root.after(150, lambda: self._input_canvas.itemconfigure(
+            send_item, image=self._imgs["send"]))
         self.input_field.delete(0, tk.END)
         self._set_response("Thinking...")
         threading.Thread(
@@ -504,6 +526,9 @@ class SidelinesOverlay:
 
     def _on_mic_press(self, event):
         self._mic_press_time = time.time()
+        # Immediate visual feedback — dim icon shows the press registered
+        self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic_dim"])
+        self._input_canvas.itemconfigure(self._mic_hint, text="Recording in...", fill="#a1a1aa")
         self._mic_timer = self.root.after(500, self._start_recording)
 
     def _on_mic_release(self, event):
@@ -514,6 +539,9 @@ class SidelinesOverlay:
             if self._mic_timer is not None:
                 self.root.after_cancel(self._mic_timer)
                 self._mic_timer = None
+            # Restore idle state
+            self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic"])
+            self._input_canvas.itemconfigure(self._mic_hint, text="Hold to talk", fill="#71717a")
 
     def _start_recording(self):
         self._mic_timer = None
@@ -529,16 +557,23 @@ class SidelinesOverlay:
                 input=True,
                 frames_per_buffer=1024,
             )
-            # Visual feedback: red mic + "Listening..." in input field
+            # Audio cue
+            self._play_tone(self._tone_start)
+            # Visual feedback: red mic, hide hint, animated "Listening"
             self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic_red"])
+            self._input_canvas.itemconfigure(self._mic_hint, text="")
             self.input_field.delete(0, tk.END)
             self.input_field.config(fg=self.text_color)
-            self.input_field.insert(0, "Listening...")
+            self.input_field.insert(0, "Listening")
+            self._animate_listening()
+            self._pulse_mic()
             threading.Thread(target=self._record_loop, daemon=True).start()
             print("[sidelines] Recording started...")
         except Exception as e:
             print(f"[sidelines] Mic error: {e}")
             self._recording = False
+            self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic"])
+            self._input_canvas.itemconfigure(self._mic_hint, text="Hold to talk", fill="#71717a")
 
     def _record_loop(self):
         while self._recording and self._audio_stream:
@@ -548,10 +583,57 @@ class SidelinesOverlay:
             except Exception:
                 break
 
+    def _animate_listening(self, dots=0):
+        """Cycle 'Listening' → 'Listening.' → 'Listening..' → 'Listening...'"""
+        if not self._recording:
+            return
+        dots = (dots % 4)
+        text = "Listening" + "." * dots
+        self.input_field.delete(0, tk.END)
+        self.input_field.config(fg=self.text_color)
+        self.input_field.insert(0, text)
+        self._listening_anim_id = self.root.after(400, self._animate_listening, dots + 1)
+
+    def _pulse_mic(self, bright=True):
+        """Alternate red mic brightness for a pulsing effect."""
+        if not self._recording:
+            return
+        img = self._imgs["mic_red"] if bright else self._imgs["mic_red_dim"]
+        self._input_canvas.itemconfigure(self.speaker_btn, image=img)
+        self._mic_pulse_id = self.root.after(500, self._pulse_mic, not bright)
+
+    def _play_tone(self, wav_bytes):
+        """Play a short WAV tone non-blocking."""
+        def _play():
+            try:
+                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                tmp.write(wav_bytes)
+                tmp.close()
+                if sys.platform == "darwin":
+                    import subprocess
+                    subprocess.run(["afplay", tmp.name], check=False)
+                elif sys.platform == "win32":
+                    import winsound
+                    winsound.PlaySound(tmp.name, winsound.SND_FILENAME)
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+        threading.Thread(target=_play, daemon=True).start()
+
     def _stop_recording(self):
         self._recording = False
-        # Restore mic icon and input field
+        # Stop animations
+        if self._listening_anim_id:
+            self.root.after_cancel(self._listening_anim_id)
+            self._listening_anim_id = None
+        if self._mic_pulse_id:
+            self.root.after_cancel(self._mic_pulse_id)
+            self._mic_pulse_id = None
+        # Audio cue
+        self._play_tone(self._tone_stop)
+        # Restore mic icon, hint, and input field
         self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic"])
+        self._input_canvas.itemconfigure(self._mic_hint, text="Hold to talk", fill="#71717a")
         self.input_field.delete(0, tk.END)
         self.input_field.insert(0, "Ask Anything")
         self.input_field.config(fg=self.muted)
