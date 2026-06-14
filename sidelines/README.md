@@ -11,35 +11,24 @@ Sidelines runs a persistent overlay chatbox on the right side of your screen. It
 - **AI queries** powered by Google Gemini (video + text)
 - **Text-to-speech** via ElevenLabs
 
-## Requirements
+## Install
 
-- macOS (uses Quartz framework for screen capture)
-- Python 3.10+
-- Screen Recording permission (System Settings > Privacy & Security)
-- Tesseract OCR (`brew install tesseract`)
+1. Download the `.dmg` from the Sidelines website
+2. Drag **Sidelines.app** to your Applications folder
+3. Open Sidelines — on first launch, enter your API keys:
+   - **Gemini API key** (for AI queries)
+   - **ElevenLabs API key** + **Voice ID** (for text-to-speech)
+4. Grant Screen Recording permission when prompted (System Settings > Privacy & Security)
 
-## Setup
+On first launch, you'll also be prompted to select the scoreboard region on screen (or press Escape to use the ESPN preset).
 
-1. Clone the repo and install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+## API Keys
 
-2. Copy `.env.example` to `.env` and add your API keys:
-   ```bash
-   cp .env.example .env
-   ```
-
-3. Run:
-   ```bash
-   python main.py
-   ```
-
-On first launch, you'll be prompted to select the scoreboard region on screen (or press Escape to use the ESPN preset).
+Sidelines requires you to bring your own API keys. Enter them in the settings UI on first launch — they're stored locally on your machine in `~/Library/Application Support/Sidelines/config.json`.
 
 ## Configuration
 
-Edit `config.json`:
+Settings are managed in-app. Available options:
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -47,7 +36,14 @@ Edit `config.json`:
 | `buffer_seconds` | 30 | Seconds of frame history to keep |
 | `scoreboard_roi` | — | Scoreboard region `[x, y, w, h]` |
 
-## Project Structure
+## Development
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+### Project Structure
 
 ```
 sidelines/

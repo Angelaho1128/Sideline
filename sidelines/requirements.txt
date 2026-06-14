@@ -5,14 +5,13 @@ numpy
 pillow
 google-genai
 requests
-python-dotenv
 
 # Voice recording
 pyaudio
 
-# Screen capture
-# Windows / Linux — fast cross-platform capture
-mss
+# macOS frameworks (screen capture, window management)
+pyobjc-framework-Quartz
+pyobjc-framework-Cocoa
 
-# macOS only — install manually if on macOS:
-# pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa
+# Packaging
+pyinstaller

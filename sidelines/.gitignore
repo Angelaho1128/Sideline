@@ -24,3 +24,15 @@ env/
 # Temp files
 *.mp4
 *.tmp
+
+# Runtime config (generated on first launch)
+config.json
+
+# Debug / development
+_render_test.py
+plan.md
+docs/superpowers/
+
+# Debug screenshots
+*.png
+!overlay/assets/*.png
