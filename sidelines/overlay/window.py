@@ -9,7 +9,7 @@ import time
 import tkinter as tk
 import wave
 
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from overlay import icons
 from intelligence.gemini import GeminiClient
@@ -161,6 +161,9 @@ class SidelinesOverlay:
 
         # Resolve native window ID after the window is mapped
         self.root.after(500, self._resolve_and_register_window)
+
+        # Pump the OpenCV debug window from the main thread (required on macOS)
+        self.root.after(3000, self._pump_debug_window)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -855,6 +858,40 @@ class SidelinesOverlay:
             # Non-fatal — capture just won't black out the overlay region
 
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Debug window — tkinter Toplevel (works on macOS unlike cv2.imshow)
+    # ------------------------------------------------------------------
+
+    _debug_toplevel = None
+    _debug_label = None
+    _debug_photo = None  # prevent GC
+
+    def _pump_debug_window(self):
+        """Render the debug dashboard and display it in a tkinter Toplevel."""
+        try:
+            frame = self.analyzer.last_frame
+            if frame is not None:
+                import cv2
+                combined = self.analyzer.render_debug(frame)
+                if combined is not None:
+                    # BGR -> RGB for PIL
+                    rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+                    img = Image.fromarray(rgb)
+                    photo = ImageTk.PhotoImage(img)
+                    self._debug_photo = photo  # prevent GC
+
+                    if self._debug_toplevel is None or not self._debug_toplevel.winfo_exists():
+                        self._debug_toplevel = tk.Toplevel(self.root)
+                        self._debug_toplevel.title("Sidelines — Debug")
+                        self._debug_toplevel.configure(bg="black")
+                        self._debug_label = tk.Label(self._debug_toplevel, bg="black")
+                        self._debug_label.pack()
+
+                    self._debug_label.configure(image=photo)
+        except Exception:
+            pass
+        self.root.after(3000, self._pump_debug_window)
 
     def _quit(self):
         self.root.destroy()

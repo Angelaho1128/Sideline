@@ -99,6 +99,8 @@ class FrameBuffer:
 
         w = CGImageGetWidth(cg_image)
         h = CGImageGetHeight(cg_image)
+        if w == 0 or h == 0:
+            raise RuntimeError("Quartz returned a zero-dimension image")
         bytes_per_row = CGImageGetBytesPerRow(cg_image)
         raw = CGDataProviderCopyData(CGImageGetDataProvider(cg_image))
 

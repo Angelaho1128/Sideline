@@ -109,16 +109,22 @@ class FrameAnalyzer:
         self.last_motion = 0.0
         self.frame_count = 0
         self.last_ocr_text = ""
-        self._debug_window_created = False
+        self.last_frame = None  # latest frame for main-thread debug display
 
     # ------------------------------------------------------------------
-    # Debug window — left: YOLO pose roles | right: OpenCV motion analysis
+    # Debug rendering — returns a BGR numpy image (display is caller's job)
     # ------------------------------------------------------------------
-    def show_debug_window(self, frame):
+    def render_debug(self, frame):
+        """Render the debug dashboard as a BGR numpy array.
+
+        Returns None if there's nothing to show yet.
+        """
         if self.last_diff is None:
-            return
+            return None
 
         frame_h, frame_w = frame.shape[:2]
+        if frame_h == 0 or frame_w == 0:
+            return None
 
         # ---- Left panel: YOLO pose-based role detection ----
         left = frame.copy()
@@ -140,20 +146,16 @@ class FrameAnalyzer:
                 role  = _infer_role_from_pose(kps, box_h)
                 color = _ROLE_COLORS[role]
 
-                # Show keypoint count so we can debug detection quality
                 kp_count = sum(1 for j in range(17) if _kp(kps, j)) if kps is not None else 0
                 label = f"{role or 'person'} {conf:.2f} kp:{kp_count}"
 
-                # Bounding box
                 cv2.rectangle(left, (x1, y1), (x2, y2), color, 2)
 
-                # Label with filled background
                 (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                 cv2.rectangle(left, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
                 cv2.putText(left, label, (x1 + 2, y1 - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
 
-                # Draw skeleton
                 if kps is not None:
                     for a, b in _SKELETON:
                         pa = _kp(kps, a)
@@ -181,6 +183,8 @@ class FrameAnalyzer:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         diff_colored = cv2.applyColorMap(self.last_diff, cv2.COLORMAP_HOT)
+        if diff_colored.shape[:2] != right.shape[:2]:
+            diff_colored = cv2.resize(diff_colored, (right.shape[1], right.shape[0]))
         right = cv2.addWeighted(right, 0.65, diff_colored, 0.35, 0)
 
         cv2.putText(right, f"Motion: {self.last_motion:.1f}", (10, 25),
@@ -202,20 +206,19 @@ class FrameAnalyzer:
 
         divider = np.zeros((target_h, 4, 3), dtype=np.uint8)
         divider[:] = (60, 60, 60)
-        combined = np.hstack([left, divider, right])
-
-        if not self._debug_window_created:
-            cv2.namedWindow("Sidelines — Debug", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Sidelines — Debug", target_w * 2 + 4, target_h)
-            self._debug_window_created = True
-
-        cv2.imshow("Sidelines — Debug", combined)
-        cv2.waitKey(1)
+        return np.hstack([left, divider, right])
 
     # ------------------------------------------------------------------
     # Core frame analysis
     # ------------------------------------------------------------------
     def analyze(self, frame):
+        if frame.size == 0:
+            return {
+                "motion_score": 0.0,
+                "is_scene_cut": False,
+                "score_changed": False,
+                "ocr_text": self.last_ocr_text,
+            }
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         metadata = {
             "motion_score": 0.0,
@@ -224,6 +227,12 @@ class FrameAnalyzer:
             "ocr_text": self.last_ocr_text,
         }
         if self._has_prev_gray:
+            if self.prev_gray.shape != gray.shape:
+                self.prev_gray = gray.copy()
+                self.last_diff = np.zeros_like(gray)
+                self._has_prev_gray = True
+                self.frame_count += 1
+                return metadata
             diff = cv2.absdiff(self.prev_gray, gray)
             self.last_diff = diff.copy()
             _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
@@ -272,4 +281,5 @@ class FrameAnalyzer:
         self.prev_gray = gray.copy()
         self._has_prev_gray = True
         self.frame_count += 1
+        self.last_frame = frame
         return metadata
