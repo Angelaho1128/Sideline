@@ -1,3 +1,27 @@
+# =============================================================================
+# overlay/icons.py — Vector-drawn UI icons and audio tone generation
+#
+# What it does:
+#   Renders every icon in the overlay (brand logo, mic, send arrow, speaker,
+#   chevrons, lightning bolt, sparkle) as PIL RGBA images. All icons are
+#   drawn at 4x resolution and downsampled with LANCZOS antialiasing so
+#   strokes stay crisp on Retina/HiDPI displays. Also generates short
+#   sine-wave WAV tones (with fade-in/out to avoid clicks) used as audio
+#   cues for mic press and release events.
+#
+# Technologies:
+#   - PIL/Pillow (Image, ImageDraw) for vector-style icon rendering
+#   - wave + struct for programmatic WAV audio generation
+#   - math for sine wave synthesis
+#
+# Why it matters:
+#   The overlay has no external icon assets (besides the brand logo PNG) —
+#   every glyph is drawn in code. This keeps the app self-contained with
+#   no icon font dependencies, allows runtime recoloring (white, dimmed,
+#   red, blue variants), and ensures pixel-perfect rendering at any size.
+#   The audio tones provide tactile feedback for voice recording.
+# =============================================================================
+
 """Vector-ish UI icons rendered with PIL into RGBA images.
 
 Everything is drawn at 4x and downsampled with LANCZOS so the strokes stay

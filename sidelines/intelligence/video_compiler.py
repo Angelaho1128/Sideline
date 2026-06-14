@@ -1,3 +1,23 @@
+# =============================================================================
+# intelligence/video_compiler.py — Compile key frames into an MP4 clip
+#
+# What it does:
+#   Takes the key frames selected by KeyFrameSelector and writes them into
+#   a short MP4 video file at 2 FPS. Each frame is resized to 1280x720
+#   before encoding. The resulting clip is what gets sent to Gemini as
+#   visual context for the user's question.
+#
+# Technologies:
+#   - OpenCV (cv2.VideoWriter) with mp4v codec for video encoding
+#
+# Why it matters:
+#   Gemini accepts video input, not individual images. This module bridges
+#   the gap between the frame buffer (individual numpy arrays) and the
+#   Gemini API (a single MP4 file). The low FPS and fixed resolution keep
+#   file size small and API costs low while preserving enough visual
+#   information for the model to understand what happened on screen.
+# =============================================================================
+
 import cv2
 
 

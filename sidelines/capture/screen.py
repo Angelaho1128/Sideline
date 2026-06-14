@@ -1,3 +1,27 @@
+# =============================================================================
+# capture/screen.py — Continuous screen capture into a circular frame buffer
+#
+# What it does:
+#   FrameBuffer captures the entire visible screen at a configurable FPS and
+#   stores frames in a fixed-size deque (circular buffer). It excludes the
+#   Sidelines overlay from the capture so Gemini never sees the chatbox.
+#   On macOS it uses Quartz CGWindowListCreateImage with window-level
+#   exclusion; on Windows it uses mss for fast grab and blacks out the
+#   overlay region post-capture via the Win32 GetWindowRect API.
+#
+# Technologies:
+#   - macOS Quartz (CoreGraphics) for composited screen capture
+#   - mss (Python) for Windows screen grab
+#   - numpy for raw pixel buffer → BGR array conversion
+#   - ctypes + Win32 API for overlay region blackout on Windows
+#   - collections.deque for automatic frame eviction
+#
+# Why it matters:
+#   This is the visual input pipeline for the entire app. Every question the
+#   user asks is answered from the frames stored here. The overlay exclusion
+#   is critical — without it, Gemini would see and respond to its own UI.
+# =============================================================================
+
 import time
 import collections
 import sys

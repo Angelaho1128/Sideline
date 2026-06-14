@@ -1,3 +1,24 @@
+# =============================================================================
+# utils/config.py — Configuration persistence (config.json)
+#
+# What it does:
+#   Manages a JSON config file (config.json in the project root) that stores
+#   app settings: capture FPS, buffer duration, scoreboard ROI coordinates,
+#   and broadcast presets. load_config() reads or creates the file with
+#   sensible defaults; save_config() writes it back. Used by main.py on
+#   startup and by RegionSelector when the user picks a scoreboard region.
+#
+# Technologies:
+#   - Python json module for serialization
+#   - os.path for cross-platform file path resolution
+#
+# Why it matters:
+#   Without persistent config, users would have to re-select the scoreboard
+#   region every time they launch the app. This module keeps settings across
+#   sessions. The defaults (3 FPS, 30s buffer, ESPN preset) are tuned for
+#   baseball broadcasts and provide a working out-of-the-box experience.
+# =============================================================================
+
 import json
 import os
 

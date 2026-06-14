@@ -1,3 +1,27 @@
+# =============================================================================
+# intelligence/tts.py — Text-to-speech via ElevenLabs
+#
+# What it does:
+#   TTSClient converts Gemini's text response into spoken audio using the
+#   ElevenLabs Text-to-Speech API (Flash v2.5 model). It writes the MP3
+#   response to a temp file, plays it through the platform audio system
+#   (blocking until playback completes), then cleans up the temp file.
+#   Voice settings (stability, similarity boost, style) are tuned for a
+#   natural, conversational tone.
+#
+# Technologies:
+#   - ElevenLabs Text-to-Speech REST API (v1/text-to-speech)
+#   - requests library for HTTP POST
+#   - tempfile for transient MP3 storage
+#   - utils.audio.play_audio for cross-platform playback
+#
+# Why it matters:
+#   This lets users hear the answer spoken aloud via the speaker button,
+#   so they don't have to read the overlay while watching the game. The
+#   blocking playback model ensures the UI state (speaker icon) stays in
+#   sync with actual audio output.
+# =============================================================================
+
 import os
 import tempfile
 

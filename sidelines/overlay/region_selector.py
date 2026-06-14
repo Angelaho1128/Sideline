@@ -1,3 +1,24 @@
+# =============================================================================
+# overlay/region_selector.py — First-launch scoreboard region picker
+#
+# What it does:
+#   RegionSelector shows a fullscreen semi-transparent overlay and lets the
+#   user draw a rectangle around the scoreboard area of their screen. The
+#   selected region (x, y, width, height) is saved to config.json and used
+#   by FrameAnalyzer to crop and OCR the scoreboard on every frame. If the
+#   user presses Escape instead, it falls back to an ESPN baseball preset.
+#
+# Technologies:
+#   - tkinter (fullscreen canvas with crosshair cursor)
+#   - utils.config for persisting the selected ROI to config.json
+#
+# Why it matters:
+#   Scoreboard position varies by broadcast (ESPN, Fox, local networks).
+#   This one-time calibration step tells the analyzer exactly where to look
+#   for score text, so OCR is accurate regardless of which feed the user is
+#   watching. Without it, the app would have to guess or hardcode positions.
+# =============================================================================
+
 import tkinter as tk
 
 from utils.config import load_config, save_config

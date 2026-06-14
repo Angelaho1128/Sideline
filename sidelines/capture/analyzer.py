@@ -1,3 +1,30 @@
+# =============================================================================
+# capture/analyzer.py — Per-frame analysis: motion, scene cuts, OCR, pose
+#
+# What it does:
+#   FrameAnalyzer processes each captured frame to extract metadata:
+#   - Motion score via frame differencing (how much changed since last frame)
+#   - Scene cut detection via histogram correlation
+#   - Scoreboard OCR using pytesseract on a user-defined ROI
+#   - YOLO pose estimation to identify on-field players and infer roles
+#     (pitcher, batter, catcher) from body keypoint geometry
+#   - Uniform color classification to distinguish teams using HSV hue
+#     clustering, filtering out grass green and umpire black
+#   - A debug renderer that stitches YOLO pose + motion heatmap side-by-side
+#
+# Technologies:
+#   - OpenCV (cv2) for image processing, histograms, color conversion
+#   - pytesseract for scoreboard text extraction (OCR)
+#   - ultralytics YOLO (yolo11n-pose) for human pose estimation
+#   - numpy for pixel math, array ops, k-means-style hue clustering
+#
+# Why it matters:
+#   This module decides which frames are "interesting" — high motion, score
+#   changes, camera cuts — so the key frame selector can pick the best ones
+#   to send to Gemini. The OCR data feeds live game context into the prompt.
+#   Pose and uniform detection power the debug dashboard for development.
+# =============================================================================
+
 import cv2
 import numpy as np
 try:

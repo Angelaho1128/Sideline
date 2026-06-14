@@ -1,3 +1,24 @@
+# =============================================================================
+# utils/audio.py — Cross-platform audio playback
+#
+# What it does:
+#   play_audio() takes a file path (MP3 or WAV) and plays it synchronously
+#   (blocks until playback finishes). On macOS it shells out to afplay; on
+#   Windows it uses the winmm MCI API (mciSendStringW) which supports MP3
+#   natively without extra codecs; on Linux it falls back to xdg-open.
+#
+# Technologies:
+#   - macOS: afplay (built-in CLI audio player)
+#   - Windows: ctypes + winmm.dll MCI (Multimedia Command Interface)
+#   - Linux: xdg-open fallback
+#
+# Why it matters:
+#   TTS responses need to be played aloud. Blocking playback is intentional
+#   — it keeps the speaker icon state in sync with actual audio output so
+#   the UI accurately reflects whether audio is still playing. This module
+#   abstracts the platform differences so TTS and tone playback just work.
+# =============================================================================
+
 import ctypes
 import subprocess
 import sys

@@ -1,3 +1,40 @@
+# =============================================================================
+# overlay/window.py — Persistent floating overlay UI (the main chatbox)
+#
+# What it does:
+#   SidelinesOverlay is the entire user-facing interface: a borderless,
+#   translucent, always-on-top tkinter window with a dark glassmorphism
+#   aesthetic. It includes:
+#   - A draggable header with brand logo and close button
+#   - A response area with a white accent bar (auto-resizes to fit text)
+#   - An input bar with text entry, hold-to-talk mic, and send button
+#   - A collapsible left tab that slides the panel in/out with easing
+#   - TTS playback via a speaker button
+#   - A debug window showing YOLO pose and motion analysis side-by-side
+#
+#   On macOS, it patches TKWindow to accept keyboard input in borderless
+#   mode, creates an invisible NSPanel carrier so the overlay appears on
+#   all Spaces (including over fullscreen apps), and applies rounded
+#   corners with a hairline border via Core Animation layers.
+#   On Windows, it uses Win32 API to set topmost + remove taskbar button.
+#
+# Technologies:
+#   - tkinter for the GUI (frameless via overrideredirect)
+#   - PIL/Pillow + ImageTk for icon rendering
+#   - pyaudio for mic recording (hold-to-talk)
+#   - ctypes + Objective-C runtime for macOS NSWindow/NSPanel manipulation
+#   - ctypes + Win32 API for Windows overlay configuration
+#   - AppKit/Quartz for macOS Space behavior and rounded corners
+#   - threading for background AI processing, TTS, and mic recording
+#
+# Why it matters:
+#   This is the only thing the user sees and interacts with. It ties
+#   together every backend system — capture, analysis, key frame selection,
+#   Gemini, STT, and TTS — into a single cohesive experience. The overlay
+#   design (always-on-top, translucent, collapsible) lets users keep
+#   watching the game while getting AI-powered commentary.
+# =============================================================================
+
 import ctypes
 import ctypes.util
 import io
@@ -451,6 +488,32 @@ class SidelinesOverlay:
         if self.input_field.get() == "Ask Anything":
             self.input_field.delete(0, tk.END)
             self.input_field.config(fg=self.text_color)
+            self._pause_media()
+
+    def _pause_media(self):
+        """Send a media play/pause key to pause whatever is playing on screen."""
+        try:
+            if sys.platform == "darwin":
+                from AppKit import NSEvent, NSSystemDefined
+                from Quartz import CGEventPost, kCGSessionEventTap
+
+                NX_KEYTYPE_PLAY = 16
+                for state, flag in ((0xa, 0xa00), (0xb, 0xb00)):
+                    ev = NSEvent.otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(
+                        NSSystemDefined, (0, 0), flag, 0, 0, None, 8,
+                        (NX_KEYTYPE_PLAY << 16) | (state << 8), -1,
+                    )
+                    CGEventPost(kCGSessionEventTap, ev.CGEvent())
+            elif sys.platform == "win32":
+                VK_MEDIA_PLAY_PAUSE = 0xB3
+                KEYEVENTF_EXTENDEDKEY = 0x0001
+                KEYEVENTF_KEYUP = 0x0002
+                ctypes.windll.user32.keybd_event(
+                    VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_EXTENDEDKEY, 0)
+                ctypes.windll.user32.keybd_event(
+                    VK_MEDIA_PLAY_PAUSE, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+        except Exception as exc:
+            print(f"[sidelines] Media pause failed: {exc}", file=sys.stderr)
 
     def _restore_placeholder(self, event):
         if not self.input_field.get().strip():
@@ -519,8 +582,10 @@ class SidelinesOverlay:
     def _process_question(self, question):
         video_path = None
         try:
-            all_frames = self.frame_buffer.get_all_frames()
-            key_frames = self.key_frame_selector.select(all_frames)
+            recent_frames = self.frame_buffer.get_last_n_seconds(30)
+            if not recent_frames:
+                recent_frames = self.frame_buffer.get_all_frames()
+            key_frames = self.key_frame_selector.select(recent_frames)
 
             if not key_frames:
                 self.root.after(
@@ -540,7 +605,7 @@ class SidelinesOverlay:
                 return
 
             # Deduplicated OCR history for game context
-            ocr_texts = [f.get("ocr_text", "") for f in all_frames if f.get("ocr_text")]
+            ocr_texts = [f.get("ocr_text", "") for f in recent_frames if f.get("ocr_text")]
             seen, ocr_lines = set(), []
             for t in ocr_texts[-10:]:
                 if t not in seen:
@@ -600,6 +665,8 @@ class SidelinesOverlay:
             )
             # Audio cue
             self._play_tone(self._tone_start)
+            # Pause any playing media
+            self._pause_media()
             # Visual feedback: red mic, hide hint, animated "Listening"
             self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic_red"])
             self._input_canvas.itemconfigure(self._mic_hint, text="")

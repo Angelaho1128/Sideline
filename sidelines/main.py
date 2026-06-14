@@ -1,3 +1,24 @@
+# =============================================================================
+# main.py — Application entry point
+#
+# What it does:
+#   Boots Sidelines: loads environment variables and config, prompts the user
+#   to select a scoreboard region on first launch, initializes the screen
+#   capture buffer and frame analyzer, creates the persistent overlay window,
+#   and starts a background thread that continuously captures and analyzes
+#   screen frames. The main thread runs the tkinter event loop (the overlay).
+#
+# Technologies:
+#   - python-dotenv for .env loading
+#   - threading for background screen capture
+#   - tkinter (via SidelinesOverlay) for the GUI
+#
+# Why it matters:
+#   This is the single file you run to start Sidelines. It wires together
+#   every subsystem — capture, analysis, AI, and UI — and manages the
+#   capture-loop / UI-loop threading model that keeps the app responsive.
+# =============================================================================
+
 import sys
 import os
 import threading
@@ -17,11 +38,26 @@ from overlay.window import SidelinesOverlay
 
 def capture_loop(frame_buffer, analyzer, fps):
     count = 0
+    last_add_time = 0
     while True:
         try:
             frame = frame_buffer.capture_frame()
             metadata = analyzer.analyze(frame)
-            frame_buffer.add_frame(frame, metadata)
+
+            # Skip near-static frames (e.g. paused video) so the buffer
+            # retains the actual action.  Always add the first frame and
+            # at least one frame every 5 seconds for liveness.
+            motion = metadata.get("motion_score", 0)
+            is_interesting = (
+                motion >= 1.0
+                or metadata.get("score_changed")
+                or metadata.get("is_scene_cut")
+            )
+            now = time.time()
+            if is_interesting or not frame_buffer.buffer or (now - last_add_time) >= 5.0:
+                frame_buffer.add_frame(frame, metadata)
+                last_add_time = now
+
             count += 1
             if count == 1:
                 h, w = frame.shape[:2]
