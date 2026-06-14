@@ -211,7 +211,7 @@ class SidelinesOverlay:
 
         close_btn = tk.Label(
             header, text="\u2715", font=(self.ui_font, 15),
-            bg=self.bg, fg=self.text_color, cursor="hand2",
+            bg=self.bg, fg=self.text_color,
         )
         close_btn.pack(side=tk.RIGHT)
         close_btn.bind("<Button-1>", lambda e: self._quit())
@@ -267,7 +267,7 @@ class SidelinesOverlay:
         tab_w = self.STRIP - 6
         self.tab = tk.Canvas(
             self.root, width=tab_w, height=40,
-            bg=self.bg, highlightthickness=0, cursor="hand2",
+            bg=self.bg, highlightthickness=0,
         )
         self._round_rect(self.tab, 1, 1, tab_w - 1, 39, 6,
                          fill=self.tab_bg, outline="")
@@ -370,6 +370,8 @@ class SidelinesOverlay:
 
         if self._collapsed:
             self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_left"])
+            # Re-pack content before sliding so text is visible during animation
+            self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
             self._slide_window(
                 cur_w, w, right_edge, cur_y, h,
                 on_complete=self._finish_expand,
