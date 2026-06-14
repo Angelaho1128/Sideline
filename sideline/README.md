@@ -18,24 +18,28 @@ Sidelines runs a persistent overlay chatbox on the right side of your screen. It
 
 1. Clone the repo and install dependencies:
    ```bash
-   git clone https://github.com/your-username/sidelines.git
+   git clone https://github.com/Angelaho1128/Sideline
    cd sidelines
    pip install -r requirements.txt
    ```
-2. On first launch, enter your API keys in the settings UI:
-   - **Gemini API key** (for AI queries)
-   - **ElevenLabs API key** + **Voice ID** (for speech-to-text and text-to-speech)
+2. Create a `.env` file in the project root with your API keys:
+   ```
+   GEMINI_API_KEY=your-gemini-key
+   ELEVEN_STT_API_KEY=your-elevenlabs-key
+   ELEVEN_TTS_API_KEY=your-elevenlabs-key
+   ELEVEN_VOICE_ID=your-voice-id
+   ```
 3. Grant Screen Recording permission (macOS: System Settings > Privacy & Security)
 4. Run:
    ```bash
-   python main.py
+   python3 main.py
    ```
 
 On first launch, you'll also be prompted to select the scoreboard region on screen (or press Escape to use the ESPN preset).
 
 ## API Keys
 
-Sidelines requires you to bring your own API keys. Enter them in the settings UI on first launch — they're stored locally on your machine.
+Sidelines requires you to bring your own API keys. Add them to a `.env` file in the project root — they're loaded on startup and stay local to your machine.
 
 - `GEMINI_API_KEY` — Google Gemini API key
 - `ELEVEN_STT_API_KEY` — ElevenLabs API key (needs speech-to-text permission)
