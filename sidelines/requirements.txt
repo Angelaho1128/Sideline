@@ -5,13 +5,15 @@ numpy
 pillow
 google-genai
 requests
+python-dotenv
 
-# Voice recording
+# Voice
 pyaudio
 
 # macOS frameworks (screen capture, window management)
-pyobjc-framework-Quartz
-pyobjc-framework-Cocoa
+# Not needed on Windows — install only on macOS
+pyobjc-framework-Quartz; sys_platform == "darwin"
+pyobjc-framework-Cocoa; sys_platform == "darwin"
 
 # Packaging
 pyinstaller

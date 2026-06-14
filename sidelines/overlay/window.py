@@ -15,6 +15,7 @@ from overlay import icons
 from intelligence.gemini import GeminiClient
 from intelligence.key_frames import KeyFrameSelector
 from intelligence.stt import STTClient
+from intelligence.tts import TTSClient
 from intelligence.video_compiler import compile_to_video
 
 # ---------------------------------------------------------------------------
@@ -102,6 +103,8 @@ class SidelinesOverlay:
         self.key_frame_selector = KeyFrameSelector()
         self.gemini = GeminiClient()
         self.stt = STTClient()
+        self.tts_client = TTSClient()
+        self._tts_playing = False
 
         # Mic recording state
         self._mic_press_time = 0
@@ -202,6 +205,9 @@ class SidelinesOverlay:
         self._imgs["mic_red"] = ImageTk.PhotoImage(icons.mic(20, color=(255, 80, 80, 255)))
         self._imgs["mic_red_dim"] = ImageTk.PhotoImage(icons.mic(20, color=(180, 50, 50, 255)))  # pulse dim
         self._imgs["send"] = ImageTk.PhotoImage(icons.send(20, color=white))
+        self._imgs["speaker"] = ImageTk.PhotoImage(icons.speaker(18, color=white))
+        self._imgs["speaker_dim"] = ImageTk.PhotoImage(icons.speaker(18, color=(161, 161, 170, 255)))
+        self._imgs["speaker_play"] = ImageTk.PhotoImage(icons.speaker(18, color=(96, 165, 250, 255)))
         self._imgs["chev_left"] = ImageTk.PhotoImage(
             icons.chevron(16, "left", color=white))
         self._imgs["chev_right"] = ImageTk.PhotoImage(
@@ -257,6 +263,7 @@ class SidelinesOverlay:
             insertbackground=self.text_color,
             borderwidth=0, highlightthickness=0, height=2,
             padx=0, pady=0, spacing1=2, spacing2=5, spacing3=2,
+            cursor="arrow",
         )
         self.response_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._resp_w = 0
@@ -272,6 +279,16 @@ class SidelinesOverlay:
         self.response_text.config(state=tk.DISABLED)
         # Size the text box to its content once the window has a real width.
         self.root.after(80, self._fit_response_height)
+
+        # --- Speaker button (TTS playback) below response, right-aligned ---
+        speaker_frame = tk.Frame(message_frame, bg=self.bg)
+        speaker_frame.pack(side=tk.TOP, fill=tk.X, pady=(4, 0))
+        self.speak_btn = tk.Label(
+            speaker_frame, image=self._imgs["speaker"],
+            bg=self.bg,
+        )
+        self.speak_btn.pack(side=tk.RIGHT)
+        self.speak_btn.bind("<Button-1>", self._on_speak)
 
         # --- Left collapse tab (overlays the left edge, vertically centered) ---
         # Mockup: h-10 w-6 rounded-l-md arrow tab on the panel's left edge.
@@ -448,12 +465,30 @@ class SidelinesOverlay:
         self._fit_response_height()
 
     def _fit_response_height(self):
-        """Shrink/grow the response box to fit its wrapped content so the
-        accent bar matches the text height (mockup's `items-start`)."""
+        """Shrink/grow the response box and window to fit wrapped content."""
         try:
             self.response_text.update_idletasks()
             lines = self.response_text.count("1.0", "end", "displaylines")[0]
             self.response_text.config(height=max(2, int(lines)))
+            self.root.update_idletasks()
+
+            # Grow/shrink window to fit content (never below default HEIGHT)
+            req_h = self.root.winfo_reqheight()
+            new_h = max(self.HEIGHT, req_h)
+            screen_h = self.root.winfo_screenheight()
+            new_h = min(new_h, screen_h - 40)
+
+            cur_w = self.root.winfo_width() or self.WIDTH
+            cur_h = self.root.winfo_height()
+            if abs(new_h - cur_h) > 2:
+                x = self.root.winfo_x()
+                y = self.root.winfo_y()
+                # Keep window on screen when growing downward
+                if y + new_h > screen_h - 20:
+                    y = max(20, screen_h - new_h - 20)
+                self.root.geometry(f"{cur_w}x{new_h}+{x}+{y}")
+                # Update expanded geometry for collapse/expand animation
+                self._expanded_geometry = (cur_w, new_h, x, y)
         except Exception:
             pass
 
@@ -687,6 +722,33 @@ class SidelinesOverlay:
                 self.root.after(0, self._set_response, "Couldn't hear that. Try again.")
         except Exception as e:
             self.root.after(0, self._set_response, f"Error: {e}")
+
+    # ------------------------------------------------------------------
+    # TTS playback
+    # ------------------------------------------------------------------
+
+    def _on_speak(self, event=None):
+        if self._tts_playing:
+            return
+        # Read whatever text is currently displayed
+        text = self.last_response or self.response_text.get("1.0", tk.END).strip()
+        if not text or text in ("Thinking...", "Listening..."):
+            return
+        self._tts_playing = True
+        self.speak_btn.config(image=self._imgs["speaker_play"])
+        threading.Thread(target=self._run_tts, args=(text,), daemon=True).start()
+
+    def _run_tts(self, text):
+        try:
+            self.tts_client.speak(text)
+        except Exception as e:
+            print(f"[sidelines] TTS error: {e}")
+        finally:
+            self.root.after(0, self._finish_tts)
+
+    def _finish_tts(self):
+        self._tts_playing = False
+        self.speak_btn.config(image=self._imgs["speaker"])
 
     def _focus_input(self, event):
         self.root.focus_force()
