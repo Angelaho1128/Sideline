@@ -31,6 +31,7 @@ config.json
 # Debug / development
 _render_test.py
 plan.md
+HANDBOOK.md
 docs/superpowers/
 
 # Debug screenshots
