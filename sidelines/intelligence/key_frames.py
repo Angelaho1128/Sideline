@@ -4,9 +4,11 @@
 # What it does:
 #   KeyFrameSelector picks the 10-12 most important frames from the capture
 #   buffer to send to Gemini. It prioritizes: (1) frames where the score
-#   changed, (2) scene cuts (camera angle switches), and (3) highest-motion
-#   frames to fill remaining slots. Results are sorted chronologically and
-#   tagged with their selection reason for the debug dashboard.
+#   changed, (2) scene cuts (camera angle switches), and (3) a balanced
+#   mix of highest-motion frames and most-recent frames to fill remaining
+#   slots. Recency bias ensures "what just happened?" questions get the
+#   latest visual context. Results are sorted chronologically and tagged
+#   with their selection reason for the debug dashboard.
 #
 # Technologies:
 #   - Pure Python — no external dependencies. Operates on frame metadata

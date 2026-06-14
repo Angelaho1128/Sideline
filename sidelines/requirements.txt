@@ -10,10 +10,17 @@ python-dotenv
 # Voice
 pyaudio
 
+# Pose estimation (optional — degrades gracefully if unavailable)
+ultralytics
+
 # macOS frameworks (screen capture, window management)
 # Not needed on Windows — install only on macOS
 pyobjc-framework-Quartz; sys_platform == "darwin"
 pyobjc-framework-Cocoa; sys_platform == "darwin"
+
+# Windows screen capture
+# Not needed on macOS — install only on Windows
+mss; sys_platform == "win32"
 
 # Packaging
 pyinstaller

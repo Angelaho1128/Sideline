@@ -8,9 +8,11 @@
 #   - A draggable header with brand logo and close button
 #   - A response area with a white accent bar (auto-resizes to fit text)
 #   - An input bar with text entry, hold-to-talk mic, and send button
+#   - Auto-pause of system media when input is focused or mic is pressed
 #   - A collapsible left tab that slides the panel in/out with easing
 #   - TTS playback via a speaker button
 #   - A debug window showing YOLO pose and motion analysis side-by-side
+#   - Recent-frame-only queries (last 30s) for better "what just happened?" answers
 #
 #   On macOS, it patches TKWindow to accept keyboard input in borderless
 #   mode, creates an invisible NSPanel carrier so the overlay appears on

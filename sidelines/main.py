@@ -6,7 +6,10 @@
 #   to select a scoreboard region on first launch, initializes the screen
 #   capture buffer and frame analyzer, creates the persistent overlay window,
 #   and starts a background thread that continuously captures and analyzes
-#   screen frames. The main thread runs the tkinter event loop (the overlay).
+#   screen frames. The capture loop filters out near-static frames (paused
+#   video, idle screens) so the buffer retains actual game action, while
+#   still adding at least one frame every 5 seconds for liveness. The main
+#   thread runs the tkinter event loop (the overlay).
 #
 # Technologies:
 #   - python-dotenv for .env loading
