@@ -472,6 +472,9 @@ class SidelinesOverlay:
         self._input_canvas.itemconfigure(send_item, image=self._imgs["send_dim"])
         self.root.after(150, lambda: self._input_canvas.itemconfigure(
             send_item, image=self._imgs["send"]))
+        # Brief input field flash: highlight bg → restore after 150ms
+        self.input_field.config(bg="#27272a")  # zinc-800 flash
+        self.root.after(150, lambda: self.input_field.config(bg=self.input_bg))
         self.input_field.delete(0, tk.END)
         self._set_response("Thinking...")
         threading.Thread(
