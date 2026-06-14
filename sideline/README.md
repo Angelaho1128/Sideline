@@ -1,21 +1,21 @@
-# Sidelines
+# Sideline
 
 AI-powered sports companion that watches your screen and answers questions about the game in real time.
 
 ## How It Works
 
-Sidelines runs a persistent overlay chatbox on the right side of your screen. It continuously captures screen frames in the background, analyzes them for key moments (scoreboard changes, scene cuts, motion), and uses Google Gemini's multimodal AI to answer your questions about what's happening.
+Sideline runs a persistent overlay chatbox on the right side of your screen. It continuously captures screen frames in the background, analyzes them for key moments (scoreboard changes, scene cuts, motion), and uses Google Gemini's multimodal AI to answer your questions about what's happening.
 
 - **Screen capture** via macOS Quartz API (excludes the overlay from captures)
-- **Frame analysis** with motion detection, scene cut detection, and OCR
+- **Frame analysis** with OpenCV motion detection, scene cut detection, and OCR
 - **AI queries** powered by Google Gemini (video + text)
 - **Text-to-speech** via ElevenLabs
 
 ## Install
 
-1. Download the `.dmg` from the Sidelines website
-2. Drag **Sidelines.app** to your Applications folder
-3. Open Sidelines — on first launch, enter your API keys:
+1. Download the `.dmg` from the Sideline website
+2. Drag **Sideline.app** to your Applications folder
+3. Open Sideline — on first launch, enter your API keys:
    - **Gemini API key** (for AI queries)
    - **ElevenLabs API key** + **Voice ID** (for text-to-speech)
 4. Grant Screen Recording permission when prompted (System Settings > Privacy & Security)
@@ -24,7 +24,7 @@ On first launch, you'll also be prompted to select the scoreboard region on scre
 
 ## API Keys
 
-Sidelines requires you to bring your own API keys. Enter them in the settings UI on first launch — they're stored locally on your machine in `~/Library/Application Support/Sidelines/config.json`.
+Sideline requires you to bring your own API keys. Enter them in the settings UI on first launch — they're stored locally on your machine in `~/Library/Application Support/Sideline/config.json`.
 
 ## Configuration
 
@@ -46,7 +46,7 @@ python main.py
 ### Project Structure
 
 ```
-sidelines/
+sideline/
 ├── main.py                  # Entry point
 ├── capture/
 │   ├── screen.py            # Screen capture (Quartz)
