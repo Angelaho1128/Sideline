@@ -1,17 +1,20 @@
 import ctypes
 import ctypes.util
+import io
 import os
 import sys
 import tempfile
 import threading
+import time
 import tkinter as tk
+import wave
 
 from PIL import ImageTk
 
 from overlay import icons
 from intelligence.gemini import GeminiClient
 from intelligence.key_frames import KeyFrameSelector
-from intelligence.tts import TTSClient
+from intelligence.stt import STTClient
 from intelligence.video_compiler import compile_to_video
 
 # ---------------------------------------------------------------------------
@@ -98,7 +101,15 @@ class SidelinesOverlay:
 
         self.key_frame_selector = KeyFrameSelector()
         self.gemini = GeminiClient()
-        self.tts = TTSClient()
+        self.stt = STTClient()
+
+        # Mic recording state
+        self._mic_press_time = 0
+        self._mic_timer = None
+        self._recording = False
+        self._audio_chunks = []
+        self._audio_stream = None
+        self._pyaudio_instance = None
 
         # Theme colors — glassmorphism (Tailwind zinc palette)
         self.bg = "#18181b"          # zinc-900 panel (~88% opacity via -alpha)
@@ -178,6 +189,7 @@ class SidelinesOverlay:
         white = (255, 255, 255, 255)
         self._imgs["logo"] = ImageTk.PhotoImage(icons.brand_logo(22, color=white))
         self._imgs["mic"] = ImageTk.PhotoImage(icons.mic(20, color=white))
+        self._imgs["mic_red"] = ImageTk.PhotoImage(icons.mic(20, color=(255, 80, 80, 255)))
         self._imgs["send"] = ImageTk.PhotoImage(icons.send(20, color=white))
         self._imgs["chev_left"] = ImageTk.PhotoImage(
             icons.chevron(16, "left", color=white))
@@ -293,9 +305,11 @@ class SidelinesOverlay:
         self.input_field.bind("<Return>", self._on_submit)
         self.input_field.bind("<Button-1>", self._focus_input)
 
-        # Controls row: mic (left) doubles as the speak/TTS affordance.
+        # Controls row: mic (left) — hold to record voice, tap for TTS.
+        self._input_canvas = c
         self.speaker_btn = c.create_image(pad + 10, icon_row_y, image=self._imgs["mic"])
-        c.tag_bind(self.speaker_btn, "<Button-1>", self._on_speak)
+        c.tag_bind(self.speaker_btn, "<ButtonPress-1>", self._on_mic_press)
+        c.tag_bind(self.speaker_btn, "<ButtonRelease-1>", self._on_mic_release)
 
         send_item = c.create_image(inner_w - pad - 10, icon_row_y, image=self._imgs["send"])
         c.tag_bind(send_item, "<Button-1>", self._on_submit)
@@ -482,11 +496,107 @@ class SidelinesOverlay:
                 except OSError:
                     pass
 
-    def _on_speak(self, event):
-        if self.last_response:
-            threading.Thread(
-                target=self.tts.speak, args=(self.last_response,), daemon=True
-            ).start()
+    # ------------------------------------------------------------------
+    # Mic: hold-to-record
+    # ------------------------------------------------------------------
+
+    def _on_mic_press(self, event):
+        self._mic_press_time = time.time()
+        self._mic_timer = self.root.after(500, self._start_recording)
+
+    def _on_mic_release(self, event):
+        if self._recording:
+            self._stop_recording()
+        else:
+            # Released before 500ms — cancel the pending timer
+            if self._mic_timer is not None:
+                self.root.after_cancel(self._mic_timer)
+                self._mic_timer = None
+
+    def _start_recording(self):
+        self._mic_timer = None
+        try:
+            import pyaudio
+            self._pyaudio_instance = pyaudio.PyAudio()
+            self._audio_chunks = []
+            self._recording = True
+            self._audio_stream = self._pyaudio_instance.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=16000,
+                input=True,
+                frames_per_buffer=1024,
+            )
+            # Visual feedback: red mic + "Listening..." in input field
+            self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic_red"])
+            self.input_field.delete(0, tk.END)
+            self.input_field.config(fg=self.text_color)
+            self.input_field.insert(0, "Listening...")
+            threading.Thread(target=self._record_loop, daemon=True).start()
+            print("[sidelines] Recording started...")
+        except Exception as e:
+            print(f"[sidelines] Mic error: {e}")
+            self._recording = False
+
+    def _record_loop(self):
+        while self._recording and self._audio_stream:
+            try:
+                data = self._audio_stream.read(1024, exception_on_overflow=False)
+                self._audio_chunks.append(data)
+            except Exception:
+                break
+
+    def _stop_recording(self):
+        self._recording = False
+        # Restore mic icon and input field
+        self._input_canvas.itemconfigure(self.speaker_btn, image=self._imgs["mic"])
+        self.input_field.delete(0, tk.END)
+        self.input_field.insert(0, "Ask Anything")
+        self.input_field.config(fg=self.muted)
+
+        if self._audio_stream:
+            try:
+                self._audio_stream.stop_stream()
+                self._audio_stream.close()
+            except Exception:
+                pass
+            self._audio_stream = None
+        if self._pyaudio_instance:
+            try:
+                self._pyaudio_instance.terminate()
+            except Exception:
+                pass
+            self._pyaudio_instance = None
+
+        if not self._audio_chunks:
+            return
+
+        print("[sidelines] Recording stopped, transcribing...")
+        # Assemble WAV bytes
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(16000)
+            wf.writeframes(b"".join(self._audio_chunks))
+        wav_bytes = buf.getvalue()
+        self._audio_chunks = []
+
+        self._set_response("Listening...")
+        threading.Thread(
+            target=self._process_voice, args=(wav_bytes,), daemon=True
+        ).start()
+
+    def _process_voice(self, wav_bytes):
+        try:
+            text = self.stt.transcribe(wav_bytes)
+            if text.strip():
+                self.root.after(0, self._set_response, "Thinking...")
+                self._process_question(text)
+            else:
+                self.root.after(0, self._set_response, "Couldn't hear that. Try again.")
+        except Exception as e:
+            self.root.after(0, self._set_response, f"Error: {e}")
 
     def _focus_input(self, event):
         self.root.focus_force()
