@@ -34,5 +34,4 @@ plan.md
 docs/superpowers/
 
 # Debug screenshots
-*.png
 !overlay/assets/*.png
