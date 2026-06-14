@@ -112,6 +112,7 @@ class SidelinesOverlay:
 
         self._imgs = {}              # keep PhotoImage refs alive
         self._collapsed = False
+        self._animating = False
 
         # Helvetica Neue Thin (style 35). On macOS tkinter resolves
         # "Helvetica Neue Thin" / "HelveticaNeue-Thin" to the correct face.
@@ -153,6 +154,8 @@ class SidelinesOverlay:
     HEIGHT = 480      # mockup: aspect-[3/4] -> 360 * 4/3
     PAD = 20          # outer gutter (p-5) between content and window edge
     STRIP = 24        # width of the collapsed strip (just the tab)
+    SLIDE_MS = 280    # collapse / expand duration
+    SLIDE_STEP = 16   # animation frame interval (~60fps)
 
     def _build_window(self):
         # Same on both platforms: borderless + topmost + translucent.
@@ -255,7 +258,7 @@ class SidelinesOverlay:
             bg=self.bg, highlightthickness=0, cursor="hand2",
         )
         self._round_rect(self.tab, 1, 1, tab_w - 1, 39, 6,
-                         fill=self.tab_bg, outline=self.border, width=1)
+                         fill=self.tab_bg, outline="")
         self._tab_chev = self.tab.create_image(
             tab_w / 2, 20, image=self._imgs["chev_left"])
         self.tab.place(x=2, rely=0.5, anchor=tk.W)
@@ -311,21 +314,69 @@ class SidelinesOverlay:
     # Collapse tab
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _ease_in_out_cubic(t):
+        """Smooth acceleration / deceleration (0..1 in, 0..1 out)."""
+        if t < 0.5:
+            return 4 * t * t * t
+        return 1 - pow(-2 * t + 2, 3) / 2
+
+    def _slide_window(self, start_w, end_w, right_edge, y, h, on_complete):
+        """Animate width with the right edge pinned — panel slides in/out."""
+        self._animating = True
+        elapsed = 0
+        collapsing = end_w < start_w
+
+        def tick():
+            nonlocal elapsed
+            elapsed += self.SLIDE_STEP
+            t = min(1.0, elapsed / self.SLIDE_MS)
+            eased = self._ease_in_out_cubic(t)
+            w = max(self.STRIP, int(start_w + (end_w - start_w) * eased))
+            x = int(right_edge - w)
+            self.root.geometry(f"{w}x{h}+{x}+{y}")
+
+            if collapsing and w < 80 and self.content.winfo_ismapped():
+                self.content.pack_forget()
+
+            if t < 1.0:
+                self.root.after(self.SLIDE_STEP, tick)
+            else:
+                self.root.geometry(f"{end_w}x{h}+{int(right_edge - end_w)}+{y}")
+                self._animating = False
+                on_complete()
+
+        tick()
+
     def _toggle_tab(self, event=None):
+        if self._animating:
+            return
+
         w, h, _, _ = self._expanded_geometry
-        cur_x, cur_y = self.root.winfo_x(), self.root.winfo_y()
+        cur_x = self.root.winfo_x()
+        cur_y = self.root.winfo_y()
+        cur_w = self.root.winfo_width()
+        right_edge = cur_x + cur_w
+
         if self._collapsed:
-            new_x = cur_x - (w - self.STRIP)  # re-grow leftward; right edge fixed
-            self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-            self.root.geometry(f"{w}x{h}+{new_x}+{cur_y}")
             self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_left"])
+            self.content.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
             self._collapsed = False
+            self._slide_window(
+                self.STRIP, w, right_edge, cur_y, h,
+                on_complete=lambda: None,
+            )
         else:
-            self.content.pack_forget()
-            new_x = cur_x + (w - self.STRIP)  # shrink to the right edge
-            self.root.geometry(f"{self.STRIP}x{h}+{new_x}+{cur_y}")
             self.tab.itemconfigure(self._tab_chev, image=self._imgs["chev_right"])
-            self._collapsed = True
+            self._slide_window(
+                cur_w, self.STRIP, right_edge, cur_y, h,
+                on_complete=self._finish_collapse,
+            )
+
+    def _finish_collapse(self):
+        if self.content.winfo_ismapped():
+            self.content.pack_forget()
+        self._collapsed = True
 
     # ------------------------------------------------------------------
     # Drag
