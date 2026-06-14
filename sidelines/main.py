@@ -16,13 +16,14 @@ from overlay.window import SidelinesOverlay
 
 
 def capture_loop(frame_buffer, analyzer, fps):
-    """Background capture loop — runs forever, silently."""
     count = 0
     while True:
         try:
             frame = frame_buffer.capture_frame()
             metadata = analyzer.analyze(frame)
             frame_buffer.add_frame(frame, metadata)
+            if count % 10 == 0:           # update debug window ~every 3 sec
+                analyzer.show_debug_window(frame)
             count += 1
             if count == 1:
                 h, w = frame.shape[:2]

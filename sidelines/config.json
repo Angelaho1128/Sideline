@@ -1,0 +1,18 @@
+{
+  "fps": 2,
+  "buffer_seconds": 10,
+  "scoreboard_roi": [
+    50,
+    40,
+    350,
+    85
+  ],
+  "presets": {
+    "espn_baseball": {
+      "top": 40,
+      "left": 50,
+      "width": 350,
+      "height": 85
+    }
+  }
+}
