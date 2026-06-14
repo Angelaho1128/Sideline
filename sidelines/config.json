@@ -1,6 +1,6 @@
 {
-  "fps":3,
-  "buffer_seconds": 15,
+  "fps": 15,
+  "buffer_seconds": 3,
   "scoreboard_roi": [
     50,
     40,
